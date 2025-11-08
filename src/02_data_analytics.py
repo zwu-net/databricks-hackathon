@@ -1,213 +1,177 @@
-{
- "cells": [
-  {
-   "cell_type": "code",
-   "execution_count": null,
-   "id": "initial_id",
-   "metadata": {
-    "collapsed": true
-   },
-   "outputs": [],
-   "source": [
-    "# Databricks notebook source\n",
-    "# MAGIC %md\n",
-    "# MAGIC # Part 3: Data Analytics\n",
-    "# MAGIC \n",
-    "# MAGIC This notebook loads the data ingested in the previous step from their UC Volume locations and performs the required analytics.\n",
-    "# MAGIC \n",
-    "# MAGIC 1.  Calculate mean and standard deviation of the US population (2013-2018).\n",
-    "# MAGIC 2.  Find the \"best year\" (max sum of `value`) for each `series_id` in the BLS data.\n",
-    "# MAGIC 3.  Join the BLS data with the population data for a specific series.\n",
-    "\n",
-    "# COMMAND ----------\n",
-    "\n",
-    "from pyspark.sql.functions import col, mean, stddev, sum, desc, row_number, trim, explode\n",
-    "from pyspark.sql.window import Window\n",
-    "from pyspark.sql.types import DoubleType\n",
-    "\n",
-    "# COMMAND ----------\n",
-    "\n",
-    "# MAGIC %md\n",
-    "# MAGIC ### Setup Paths\n",
-    "\n",
-    "# COMMAND ----------\n",
-    "\n",
-    "# Using hardcoded values for simplicity in the bundle\n",
-    "catalog = \"main\"\n",
-    "schema = \"hackathon\"\n",
-    "\n",
-    "bls_file_path = f\"/Volumes/{catalog}/{schema}/bls_data/pr.data.0.Current\"\n",
-    "pop_file_path = f\"/Volumes/{catalog}/{schema}/population_data/population_data.json\"\n",
-    "\n",
-    "# COMMAND ----------\n",
-    "\n",
-    "# MAGIC %md\n",
-    "# MAGIC ### Part 3.0: Load Datasets\n",
-    "\n",
-    "# COMMAND ----------\n",
-    "\n",
-    "# MAGIC %md\n",
-    "# MAGIC #### Load Population Data\n",
-    "# MAGIC \n",
-    "# MAGIC The data is nested inside a 'data' array in the JSON. We'll explode it and select the inner fields.\n",
-    "\n",
-    "# COMMAND ----------\n",
-    "\n",
-    "try:\n",
-    "    # Read the raw JSON\n",
-    "    raw_pop_df = spark.read.json(pop_file_path)\n",
-    "    \n",
-    "    # Explode the 'data' array and select the nested fields\n",
-    "    pop_df = raw_pop_df.select(explode(\"data\").alias(\"data\")).select(\"data.*\")\n",
-    "    \n",
-    "    # Cast Population and Year to numeric types for analysis\n",
-    "    pop_df = pop_df.withColumn(\"Population\", col(\"Population\").cast(\"long\")) \\\n",
-    "                   .withColumn(\"Year\", col(\"Year\").cast(\"int\"))\n",
-    "\n",
-    "    print(\"Population data loaded and flattened:\")\n",
-    "    pop_df.printSchema()\n",
-    "    pop_df.show(5)\n",
-    "\n",
-    "except Exception as e:\n",
-    "    print(f\"Error loading population data: {e}\")\n",
-    "    dbutils.notebook.exit(f\"Failed to load population data from {pop_file_path}\")\n",
-    "\n",
-    "# COMMAND ----------\n",
-    "\n",
-    "# MAGIC %md\n",
-    "# MAGIC #### Load BLS Time Series Data\n",
-    "# MAGIC \n",
-    "# MAGIC This is a tab-separated file (.tsv) and requires trimming whitespace, as per the hackathon hint.\n",
-    "\n",
-    "# COMMAND ----------\n",
-    "\n",
-    "try:\n",
-    "    # Read the tab-delimited file\n",
-    "    raw_bls_df = spark.read.format(\"csv\") \\\n",
-    "        .option(\"header\", \"true\") \\\n",
-    "        .option(\"delimiter\", \"\\t\") \\\n",
-    "        .load(bls_file_path)\n",
-    "\n",
-    "    # Trim whitespace from all columns\n",
-    "    bls_df = raw_bls_df.select([trim(col(c)).alias(c) for c in raw_bls_df.columns])\n",
-    "    \n",
-    "    # Cast value to Double for aggregation\n",
-    "    bls_df = bls_df.withColumn(\"value\", col(\"value\").cast(DoubleType()))\n",
-    "\n",
-    "    print(\"BLS data loaded and trimmed:\")\n",
-    "    bls_df.printSchema()\n",
-    "    bls_df.show(5)\n",
-    "\n",
-    "except Exception as e:\n",
-    "    print(f\"Error loading BLS data: {e}\")\n",
-    "    dbutils.notebook.exit(f\"Failed to load BLS data from {bls_file_path}\")\n",
-    "\n",
-    "# COMMAND ----------\n",
-    "\n",
-    "# MAGIC %md\n",
-    "# MAGIC ### Part 3.1: Population Data Analysis\n",
-    "# MAGIC \n",
-    "# MAGIC Generate the mean and the standard deviation of the annual US population across the years [2013, 2018] inclusive.\n",
-    "\n",
-    "# COMMAND ----------\n",
-    "\n",
-    "print(\"Report 1: US Population Mean & StdDev (2013-2018)\")\n",
-    "\n",
-    "pop_stats_df = pop_df.filter(\"Year >= 2013 AND Year <= 2018\") \\\n",
-    "    .select(\n",
-    "        mean(\"Population\").alias(\"mean_population\"),\n",
-    "        stddev(\"Population\").alias(\"stddev_population\")\n",
-    "    )\n",
-    "\n",
-    "pop_stats_df.show()\n",
-    "\n",
-    "# COMMAND ----------\n",
-    "\n",
-    "# MAGIC %md\n",
-    "# MAGIC ### Part 3.2: Time-Series \"Best Year\" Analysis\n",
-    "# MAGIC \n",
-    "# MAGIC For every series_id, find the *best year*: the year with the max/largest sum of \"value\" for all quarters in that year.\n",
-    "\n",
-    "# COMMAND ----------\n",
-    "\n",
-    "print(\"Report 2: Best Year by Series ID\")\n",
-    "\n",
-    "# 1. Sum values by series_id and year\n",
-    "yearly_sum_df = bls_df.groupBy(\"series_id\", \"year\") \\\n",
-    "    .agg(sum(\"value\").alias(\"total_value\"))\n",
-    "\n",
-    "# 2. Define a window to rank years by total_value for each series_id\n",
-    "window_spec = Window.partitionBy(\"series_id\").orderBy(col(\"total_value\").desc())\n",
-    "\n",
-    "# 3. Find the top-ranked year for each series_id\n",
-    "best_year_df = yearly_sum_df.withColumn(\"rank\", row_number().over(window_spec)) \\\n",
-    "    .filter(\"rank = 1\") \\\n",
-    "    .select(\"series_id\", \"year\", \"total_value\") \\\n",
-    "    .orderBy(\"series_id\")\n",
-    "\n",
-    "best_year_df.show()\n",
-    "\n",
-    "# COMMAND ----------\n",
-    "\n",
-    "# MAGIC %md\n",
-    "# MAGIC ### Part 3.3: Joined Report\n",
-    "# MAGIC \n",
-    "# MAGIC Generate a report that will provide the `value` for `series_id = PRS30006032` and `period = Q01` and the `population` for that given year.\n",
-    "\n",
-    "# COMMAND ----------\n",
-    "\n",
-    "print(\"Report 3: Joined BLS and Population Data\")\n",
-    "\n",
-    "# 1. Filter BLS data\n",
-    "bls_filtered_df = bls_df.filter(\n",
-    "    (col(\"series_id\") == \"PRS30006032\") & (col(\"period\") == \"Q01\")\n",
-    ")\n",
-    "\n",
-    "# 2. Prepare population data for join (cast Year to String to match BLS 'year' column)\n",
-    "pop_join_df = pop_df.withColumn(\"year_str\", col(\"Year\").cast(\"string\"))\n",
-    "\n",
-    "# 3. Join the two dataframes\n",
-    "joined_df = bls_filtered_df.join(\n",
-    "    pop_join_df,\n",
-    "    bls_filtered_df.year == pop_join_df.year_str\n",
-    ")\n",
-    "\n",
-    "# 4. Select and show the final report\n",
-    "final_report_df = joined_df.select(\n",
-    "    col(\"series_id\"),\n",
-    "    col(\"year\"),\n",
-    "    col(\"period\"),\n",
-    "    col(\"value\"),\n",
-    "    col(\"Population\")\n",
-    ").orderBy(col(\"year\").desc())\n",
-    "\n",
-    "final_report_df.show()\n",
-    "\n",
-    "# COMMAND ----------\n",
-    "\n",
-    "dbutils.notebook.exit(\"Data analysis complete.\")"
-   ]
-  }
- ],
- "metadata": {
-  "kernelspec": {
-   "display_name": "Python 3",
-   "language": "python",
-   "name": "python3"
-  },
-  "language_info": {
-   "codemirror_mode": {
-    "name": "ipython",
-    "version": 2
-   },
-   "file_extension": ".py",
-   "mimetype": "text/x-python",
-   "name": "python",
-   "nbconvert_exporter": "python",
-   "pygments_lexer": "ipython2",
-   "version": "2.7.6"
-  }
- },
- "nbformat": 4,
- "nbformat_minor": 5
-}
+# Databricks notebook source
+# MAGIC %md
+# MAGIC # Part 3: Data Analytics
+# MAGIC 
+# MAGIC This notebook loads the data ingested in the previous step from their UC Volume locations and performs the required analytics.
+# MAGIC 
+# MAGIC 1.  Calculate mean and standard deviation of the US population (2013-2018).
+# MAGIC 2.  Find the "best year" (max sum of `value`) for each `series_id` in the BLS data.
+# MAGIC 3.  Join the BLS data with the population data for a specific series.
+
+# COMMAND ----------
+
+from pyspark.sql.functions import col, mean, stddev, sum, desc, row_number, trim, explode
+from pyspark.sql.window import Window
+from pyspark.sql.types import DoubleType
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ### Setup Paths
+
+# COMMAND ----------
+
+# Using hardcoded values for simplicity in the bundle
+catalog = "main"
+schema = "hackathon"
+
+bls_file_path = f"/Volumes/{catalog}/{schema}/bls_data/pr.data.0.Current"
+pop_file_path = f"/Volumes/{catalog}/{schema}/population_data/population_data.json"
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ### Part 3.0: Load Datasets
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC #### Load Population Data
+# MAGIC 
+# MAGIC The data is nested inside a 'data' array in the JSON. We'll explode it and select the inner fields.
+
+# COMMAND ----------
+
+try:
+    # Read the raw JSON
+    raw_pop_df = spark.read.json(pop_file_path)
+    
+    # Explode the 'data' array and select the nested fields
+    pop_df = raw_pop_df.select(explode("data").alias("data")).select("data.*")
+    
+    # Cast Population and Year to numeric types for analysis
+    pop_df = pop_df.withColumn("Population", col("Population").cast("long")) \
+                   .withColumn("Year", col("Year").cast("int"))
+
+    print("Population data loaded and flattened:")
+    pop_df.printSchema()
+    pop_df.show(5)
+
+except Exception as e:
+    print(f"Error loading population data: {e}")
+    dbutils.notebook.exit(f"Failed to load population data from {pop_file_path}")
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC #### Load BLS Time Series Data
+# MAGIC 
+# MAGIC This is a tab-separated file (.tsv) and requires trimming whitespace, as per the hackathon hint.
+
+# COMMAND ----------
+
+try:
+    # Read the tab-delimited file
+    raw_bls_df = spark.read.format("csv") \
+        .option("header", "true") \
+        .option("delimiter", "\t") \
+        .load(bls_file_path)
+
+    # Trim whitespace from all columns
+    bls_df = raw_bls_df.select([trim(col(c)).alias(c) for c in raw_bls_df.columns])
+    
+    # Cast value to Double for aggregation
+    bls_df = bls_df.withColumn("value", col("value").cast(DoubleType()))
+
+    print("BLS data loaded and trimmed:")
+    bls_df.printSchema()
+    bls_df.show(5)
+
+except Exception as e:
+    print(f"Error loading BLS data: {e}")
+    dbutils.notebook.exit(f"Failed to load BLS data from {bls_file_path}")
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ### Part 3.1: Population Data Analysis
+# MAGIC 
+# MAGIC Generate the mean and the standard deviation of the annual US population across the years [2013, 2018] inclusive.
+
+# COMMAND ----------
+
+print("Report 1: US Population Mean & StdDev (2013-2018)")
+
+pop_stats_df = pop_df.filter("Year >= 2013 AND Year <= 2018") \
+    .select(
+        mean("Population").alias("mean_population"),
+        stddev("Population").alias("stddev_population")
+    )
+
+pop_stats_df.show()
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ### Part 3.2: Time-Series "Best Year" Analysis
+# MAGIC 
+# MAGIC For every series_id, find the *best year*: the year with the max/largest sum of "value" for all quarters in that year.
+
+# COMMAND ----------
+
+print("Report 2: Best Year by Series ID")
+
+# 1. Sum values by series_id and year
+yearly_sum_df = bls_df.groupBy("series_id", "year") \
+    .agg(sum("value").alias("total_value"))
+
+# 2. Define a window to rank years by total_value for each series_id
+window_spec = Window.partitionBy("series_id").orderBy(col("total_value").desc())
+
+# 3. Find the top-ranked year for each series_id
+best_year_df = yearly_sum_df.withColumn("rank", row_number().over(window_spec)) \
+    .filter("rank = 1") \
+    .select("series_id", "year", "total_value") \
+    .orderBy("series_id")
+
+best_year_df.show()
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ### Part 3.3: Joined Report
+# MAGIC 
+# MAGIC Generate a report that will provide the `value` for `series_id = PRS30006032` and `period = Q01` and the `population` for that given year.
+
+# COMMAND ----------
+
+print("Report 3: Joined BLS and Population Data")
+
+# 1. Filter BLS data
+bls_filtered_df = bls_df.filter(
+    (col("series_id") == "PRS30006032") & (col("period") == "Q01")
+)
+
+# 2. Prepare population data for join (cast Year to String to match BLS 'year' column)
+pop_join_df = pop_df.withColumn("year_str", col("Year").cast("string"))
+
+# 3. Join the two dataframes
+joined_df = bls_filtered_df.join(
+    pop_join_df,
+    bls_filtered_df.year == pop_join_df.year_str
+)
+
+# 4. Select and show the final report
+final_report_df = joined_df.select(
+    col("series_id"),
+    col("year"),
+    col("period"),
+    col("value"),
+    col("Population")
+).orderBy(col("year").desc())
+
+final_report_df.show()
+
+# COMMAND ----------
+
+dbutils.notebook.exit("Data analysis complete.")
