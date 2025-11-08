@@ -1,0 +1,14 @@
+# For the Databricks CLI, used to deploy and run bundles
+databricks-sdk
+
+# For local type-checking/linting of Spark code
+pyspark
+
+# Notebook 1 dependencies
+requests
+beautifulsoup4
+
+# Notebook 3 dependencies
+mlflow
+transformers[torch]
+accelerate>=0.21.0

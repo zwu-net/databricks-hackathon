@@ -1,0 +1,54 @@
+# databricks.yml
+bundle:
+  name: databricks-hackathon
+
+# Define the artifact path. Assumes your notebooks are in a 'src' folder.
+artifact_path: src
+
+resources:
+  jobs:
+    databricks-hackathon-job:
+      name: "[Hackathon] End-to-End Pipeline"
+      tasks:
+        - task_key: "01_ingest_data"
+          description: "Ingests BLS and Population data into UC Volumes"
+          notebook_task:
+            notebook_path: "01_data_ingestion.ipynb"
+          job_cluster_key: "default_cluster"
+
+        - task_key: "02_analyze_data"
+          description: "Runs analytics on the ingested data"
+          notebook_task:
+            notebook_path: "02_data_analytics.ipynb"
+          depends_on:
+            - task_key: "01_ingest_data"
+          job_cluster_key: "default_cluster"
+
+        - task_key: "03_train_model"
+          description: "Trains and registers the sentiment analysis model"
+          notebook_task:
+            notebook_path: "03_model_training.ipynb"
+          job_cluster_key: "default_cluster"
+
+      job_clusters:
+        - job_cluster_key: "default_cluster"
+          new_cluster:
+            spark_version: "14.3.x-cpu-ml-scala2.12"
+            node_type_id: "i3.xlarge"
+            num_workers: 1
+
+  model_serving_endpoints:
+    sentiment-analysis:
+      name: "sentiment-analysis"
+      config:
+        served_models:
+          - name: "sentiment_model"
+            model_name: "main.hackathon.sentiment_analysis_model" # Must match model name in 03_model_training.ipynb
+            scale_to_zero_enabled: true
+            workload_size: "Small"
+            model_version: "1"
+# Define the project's development target
+targets:
+  dev:
+    mode: development
+    default: true
