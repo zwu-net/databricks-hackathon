@@ -1,128 +1,92 @@
-{
- "cells": [
-  {
-   "cell_type": "code",
-   "execution_count": null,
-   "id": "initial_id",
-   "metadata": {
-    "collapsed": true
-   },
-   "outputs": [],
-   "source": [
-    "# Databricks notebook source\n",
-    "# MAGIC %md\n",
-    "# MAGIC # Part 5: Machine Learning with MLflow\n",
-    "# MAGIC \n",
-    "# MAGIC This notebook implements the MLOps part of the project:\n",
-    "# MAGIC 1.  Loads a pretrained HuggingFace Transformer model for sentiment analysis.\n",
-    "# MAGIC 2.  Logs the model to MLflow.\n",
-    "# MAGIC 3.  Registers the model in the Unity Catalog Model Registry.\n",
-    "# MAGIC \n",
-    "# MAGIC The Databricks Asset Bundle (`databricks.yml`) will then pick up this registered model and deploy it to a Model Serving endpoint.\n",
-    "\n",
-    "# COMMAND ----------\n",
-    "\n",
-    "# MAGIC %pip install mlflow \"transformers[torch]\" \"accelerate>=0.21.0\"\n",
-    "\n",
-    "# COMMAND ----------\n",
-    "\n",
-    "import mlflow\n",
-    "from transformers import pipeline\n",
-    "\n",
-    "# COMMAND ----------\n",
-    "\n",
-    "# MAGIC %md\n",
-    "# MAGIC ### Setup Model Name and Registry\n",
-    "\n",
-    "# COMMAND ----------\n",
-    "\n",
-    "# Using hardcoded values for simplicity in the bundle\n",
-    "catalog = \"main\"\n",
-    "schema = \"hackathon\"\n",
-    "model_name = \"sentiment_analysis_model\"\n",
-    "\n",
-    "# This is the three-level name for the model in Unity Catalog\n",
-    "uc_model_name = f\"{catalog}.{schema}.{model_name}\"\n",
-    "\n",
-    "# Set the registry URI to use Unity Catalog\n",
-    "mlflow.set_registry_uri(\"databricks-uc\")\n",
-    "\n",
-    "# COMMAND ----------\n",
-    "\n",
-    "# MAGIC %md\n",
-    "# MAGIC ### Part 5.0: Load Pretrained Model\n",
-    "# MAGIC \n",
-    "# MAGIC We'll use a standard, lightweight sentiment analysis model from HuggingFace.\n",
-    "\n",
-    "# COMMAND ----------\n",
-    "\n",
-    "hf_model_name = \"distilbert-base-uncased-finetuned-sst-2-english\"\n",
-    "sentiment_pipeline = pipeline(\"sentiment-analysis\", model=hf_model_name)\n",
-    "\n",
-    "print(f\"Model {hf_model_name} loaded.\")\n",
-    "\n",
-    "# Test the pipeline\n",
-    "print(sentiment_pipeline(\"Databricks is awesome!\"))\n",
-    "print(sentiment_pipeline(\"This project is challenging but fun.\"))\n",
-    "\n",
-    "# COMMAND ----------\n",
-    "\n",
-    "# MAGIC %md\n",
-    "# MAGIC ### Part 5.1 & 5.2: Log and Register Model\n",
-    "# MAGIC \n",
-    "# MAGIC We will log the model to MLflow and register it as a new version in Unity Catalog.\n",
-    "\n",
-    "# COMMAND ----------\n",
-    "\n",
-    "print(f\"Logging and registering model to {uc_model_name}...\")\n",
-    "\n",
-    "with mlflow.start_run() as run:\n",
-    "    # Log the model using the transformers flavor\n",
-    "    model_info = mlflow.transformers.log_model(\n",
-    "        transformers_model=sentiment_pipeline,\n",
-    "        artifact_path=\"model\",\n",
-    "        input_example=[\"This is a sample sentence.\"],\n",
-    "        registered_model_name=uc_model_name  # This automatically registers the model\n",
-    "    )\n",
-    "\n",
-    "print(f\"Model logged successfully.\")\n",
-    "print(f\"Model URI: {model_info.model_uri}\")\n",
-    "print(f\"Registered model version: {model_info.version}\")\n",
-    "\n",
-    "# COMMAND ----------\n",
-    "\n",
-    "# MAGIC %md\n",
-    "# MAGIC ### Model Registration Complete\n",
-    "# MAGIC \n",
-    "# MAGIC The model is now registered in Unity Catalog. The `databricks.yml` file is configured to find this model (`main.hackathon.sentiment_analysis_model`) and deploy it to a Model Serving endpoint named `sentiment-analysis`.\n",
-    "# MAGIC \n",
-    "# MAGIC After deploying the bundle (`databricks bundle deploy`), you can go to the **Serving** tab in your workspace to see the endpoint being created.\n",
-    "\n",
-    "# COMMAND ----------\n",
-    "\n",
-    "dbutils.notebook.exit(f\"Model registered to {uc_model_name} as version {model_info.version}\")"
-   ]
-  }
- ],
- "metadata": {
-  "kernelspec": {
-   "display_name": "Python 3",
-   "language": "python",
-   "name": "python3"
-  },
-  "language_info": {
-   "codemirror_mode": {
-    "name": "ipython",
-    "version": 2
-   },
-   "file_extension": ".py",
-   "mimetype": "text/x-python",
-   "name": "python",
-   "nbconvert_exporter": "python",
-   "pygments_lexer": "ipython2",
-   "version": "2.7.6"
-  }
- },
- "nbformat": 4,
- "nbformat_minor": 5
-}
+# Databricks notebook source
+# MAGIC %md
+# MAGIC # Part 5: Machine Learning with MLflow
+# MAGIC 
+# MAGIC This notebook implements the MLOps part of the project:
+# MAGIC 1.  Loads a pretrained HuggingFace Transformer model for sentiment analysis.
+# MAGIC 2.  Logs the model to MLflow.
+# MAGIC 3.  Registers the model in the Unity Catalog Model Registry.
+# MAGIC 
+# MAGIC The Databricks Asset Bundle (`databricks.yml`) will then pick up this registered model and deploy it to a Model Serving endpoint.
+
+# COMMAND ----------
+
+# MAGIC %pip install mlflow "transformers[torch]" "accelerate>=0.21.0"
+
+# COMMAND ----------
+
+import mlflow
+from transformers import pipeline
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ### Setup Model Name and Registry
+
+# COMMAND ----------
+
+# Using hardcoded values for simplicity in the bundle
+catalog = "main"
+schema = "hackathon"
+model_name = "sentiment_analysis_model"
+
+# This is the three-level name for the model in Unity Catalog
+uc_model_name = f"{catalog}.{schema}.{model_name}"
+
+# Set the registry URI to use Unity Catalog
+mlflow.set_registry_uri("databricks-uc")
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ### Part 5.0: Load Pretrained Model
+# MAGIC 
+# MAGIC We'll use a standard, lightweight sentiment analysis model from HuggingFace.
+
+# COMMAND ----------
+
+hf_model_name = "distilbert-base-uncased-finetuned-sst-2-english"
+sentiment_pipeline = pipeline("sentiment-analysis", model=hf_model_name)
+
+print(f"Model {hf_model_name} loaded.")
+
+# Test the pipeline
+print(sentiment_pipeline("Databricks is awesome!"))
+print(sentiment_pipeline("This project is challenging but fun."))
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ### Part 5.1 & 5.2: Log and Register Model
+# MAGIC 
+# MAGIC We will log the model to MLflow and register it as a new version in Unity Catalog.
+
+# COMMAND ----------
+
+print(f"Logging and registering model to {uc_model_name}...")
+
+with mlflow.start_run() as run:
+    # Log the model using the transformers flavor
+    model_info = mlflow.transformers.log_model(
+        transformers_model=sentiment_pipeline,
+        artifact_path="model",
+        input_example=["This is a sample sentence."],
+        registered_model_name=uc_model_name  # This automatically registers the model
+    )
+
+print(f"Model logged successfully.")
+print(f"Model URI: {model_info.model_uri}")
+print(f"Registered model version: {model_info.version}")
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ### Model Registration Complete
+# MAGIC 
+# MAGIC The model is now registered in Unity Catalog. The `databricks.yml` file is configured to find this model (`main.hackathon.sentiment_analysis_model`) and deploy it to a Model Serving endpoint named `sentiment-analysis`.
+# MAGIC 
+# MAGIC After deploying the bundle (`databricks bundle deploy`), you can go to the **Serving** tab in your workspace to see the endpoint being created.
+
+# COMMAND ----------
+
+dbutils.notebook.exit(f"Model registered to {uc_model_name} as version {model_info.version}")
