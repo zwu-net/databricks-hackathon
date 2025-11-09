@@ -1,17 +1,21 @@
 # Databricks notebook source
 # MAGIC %md
 # MAGIC # Part 5: Machine Learning with MLflow
-# MAGIC 
+# MAGIC
 # MAGIC This notebook implements the MLOps part of the project:
 # MAGIC 1.  Loads a pretrained HuggingFace Transformer model for sentiment analysis.
 # MAGIC 2.  Logs the model to MLflow.
 # MAGIC 3.  Registers the model in the Unity Catalog Model Registry.
-# MAGIC 
+# MAGIC
 # MAGIC The Databricks Asset Bundle (`databricks.yml`) will then pick up this registered model and deploy it to a Model Serving endpoint.
 
 # COMMAND ----------
 
-# MAGIC %pip install mlflow "transformers[torch]" "accelerate>=0.21.0"
+# MAGIC %pip install mlflow torch torchvision "transformers[torch]" "accelerate>=0.21.0"
+
+# COMMAND ----------
+
+dbutils.library.restartPython()
 
 # COMMAND ----------
 
@@ -40,7 +44,7 @@ mlflow.set_registry_uri("databricks-uc")
 
 # MAGIC %md
 # MAGIC ### Part 5.0: Load Pretrained Model
-# MAGIC 
+# MAGIC
 # MAGIC We'll use a standard, lightweight sentiment analysis model from HuggingFace.
 
 # COMMAND ----------
@@ -58,7 +62,7 @@ print(sentiment_pipeline("This project is challenging but fun."))
 
 # MAGIC %md
 # MAGIC ### Part 5.1 & 5.2: Log and Register Model
-# MAGIC 
+# MAGIC
 # MAGIC We will log the model to MLflow and register it as a new version in Unity Catalog.
 
 # COMMAND ----------
@@ -76,17 +80,35 @@ with mlflow.start_run() as run:
 
 print(f"Model logged successfully.")
 print(f"Model URI: {model_info.model_uri}")
-print(f"Registered model version: {model_info.version}")
+
+# Get the version number from the model URI
+# The URI format is typically: models:/model_name/version or a unique identifier
+# For Unity Catalog, we need to search for the version differently
+from mlflow.tracking import MlflowClient
+client = MlflowClient()
+
+# Search for all versions of this model and get the latest
+all_versions = client.search_model_versions(f"name='{uc_model_name}'")
+if all_versions:
+    # Sort by version number (descending) and get the latest
+    latest_version = max(all_versions, key=lambda v: int(v.version))
+    model_version = latest_version.version
+    print(f"Registered model version: {model_version}")
+else:
+    # Fallback: extract from the run if possible
+    model_version = "latest"
+    print(f"Could not determine version number, using: {model_version}")
+
 
 # COMMAND ----------
 
 # MAGIC %md
 # MAGIC ### Model Registration Complete
-# MAGIC 
+# MAGIC
 # MAGIC The model is now registered in Unity Catalog. The `databricks.yml` file is configured to find this model (`main.hackathon.sentiment_analysis_model`) and deploy it to a Model Serving endpoint named `sentiment-analysis`.
-# MAGIC 
+# MAGIC
 # MAGIC After deploying the bundle (`databricks bundle deploy`), you can go to the **Serving** tab in your workspace to see the endpoint being created.
 
 # COMMAND ----------
 
-dbutils.notebook.exit(f"Model registered to {uc_model_name} as version {model_info.version}")
+dbutils.notebook.exit(f"Model registered to {uc_model_name} as version {model_version}")

@@ -1,11 +1,11 @@
 # Databricks notebook source
 # MAGIC %md
 # MAGIC # Part 1 & 2: Data Ingestion
-# MAGIC 
+# MAGIC
 # MAGIC This notebook ingests two data sources:
 # MAGIC 1.  **BLS Time Series Data:** Scrapes and syncs files from the BLS FTP-style website into the `bls_data` UC Volume.
 # MAGIC 2.  **US Population Data:** Fetches data from the DataUSA API and saves it to the `population_data` UC Volume.
-# MAGIC 
+# MAGIC
 # MAGIC It's designed to be idempotent—it won't re-download files that already exist and will remove files that are no longer in the source.
 
 # COMMAND ----------
@@ -13,6 +13,11 @@
 # MAGIC %pip install requests beautifulsoup4
 
 # COMMAND ----------
+
+dbutils.library.restartPython()
+
+# COMMAND ----------
+
 
 import requests
 import os
@@ -23,7 +28,7 @@ from bs4 import BeautifulSoup
 
 # MAGIC %md
 # MAGIC ### Setup Widgets and Paths
-# MAGIC 
+# MAGIC
 # MAGIC Define the UC Volume paths.
 
 # COMMAND ----------
@@ -49,7 +54,7 @@ os.makedirs(pop_volume_path, exist_ok=True)
 
 # MAGIC %md
 # MAGIC ### Part 1: BLS Time Series Data
-# MAGIC 
+# MAGIC
 # MAGIC Scrape the BLS directory and sync files.
 
 # COMMAND ----------
@@ -63,9 +68,8 @@ def sync_bls_data():
     base_url = "https://download.bls.gov/pub/time.series/pr/"
     
     # Per the hackathon hint, a User-Agent is required to avoid 403 Forbidden errors.
-    # You should replace this with your own email or contact info.
     headers = {
-        "User-Agent": "DatabricksHackathonParticipant/1.0 (your-email@example.com)"
+        "User-Agent": "DatabricksHackathonParticipant/1.0 (zhou.wu@lwtech.edu)"
     }
 
     print(f"Syncing data from {base_url} to {bls_volume_path}...")
@@ -80,11 +84,31 @@ def sync_bls_data():
         source_files = set()
         for link in soup.find_all('a'):
             href = link.get('href')
-            # Filter for actual data files (e.g., end in .txt, .data, .series)
-            if href and not href.startswith(('?', '/')):
-                source_files.add(href)
-        
+            if href:
+                # Extract just the filename, handling different link formats
+                # Skip parent directory links and sort links
+                if href in ['../', '../', '?C=N;O=D', '?C=M;O=A', '?C=S;O=A', '?C=D;O=A']:
+                    continue
+                
+                # Remove any leading slash or path components
+                filename = href.split('/')[-1]
+                
+                # Remove any query parameters
+                filename = filename.split('?')[0]
+                
+                # Only add files with extensions (not directories)
+                if filename and '.' in filename:
+                    source_files.add(filename)
+                    
         print(f"Found {len(source_files)} files at source.")
+        
+        # Debug: print first few files found
+        if source_files:
+            print(f"Sample files: {list(source_files)[:5]}")
+        else:
+            print("WARNING: No files found. Debugging link structure...")
+            for link in soup.find_all('a')[:10]:
+                print(f"  Link: {link.get('href')} | Text: {link.text}")
 
         # 2. Get list of files currently in the UC Volume
         try:
@@ -138,13 +162,17 @@ def fetch_population_data():
     """
     Fetches US population data from the DataUSA API and saves it as a single JSON file.
     """
-    api_url = "https://datausa.io/api/data?drilldowns=Nation&measures=Population"
+    api_url = "https://honolulu-api.datausa.io/tesseract/data.jsonrecords?cube=acs_yg_total_population_1&drilldowns=Year%2CNation&locale=en&measures=Population"
+
+    headers = {
+        "User-Agent": "DatabricksHackathonParticipant/1.0 (zhou.wu@lwtech.edu)"
+    }
     output_path = os.path.join(pop_volume_path, "population_data.json")
 
     print(f"Fetching population data from {api_url}...")
     
     try:
-        response = requests.get(api_url)
+        response = requests.get(api_url, headers=headers)
         response.raise_for_status()
         data = response.json()
         
@@ -163,7 +191,7 @@ fetch_population_data()
 
 # MAGIC %md
 # MAGIC ### Ingestion Complete
-# MAGIC 
+# MAGIC
 # MAGIC Both datasets are now available in their respective UC Volumes.
 
 # COMMAND ----------

@@ -1,9 +1,9 @@
 # Databricks notebook source
 # MAGIC %md
 # MAGIC # Part 3: Data Analytics
-# MAGIC 
+# MAGIC
 # MAGIC This notebook loads the data ingested in the previous step from their UC Volume locations and performs the required analytics.
-# MAGIC 
+# MAGIC
 # MAGIC 1.  Calculate mean and standard deviation of the US population (2013-2018).
 # MAGIC 2.  Find the "best year" (max sum of `value`) for each `series_id` in the BLS data.
 # MAGIC 3.  Join the BLS data with the population data for a specific series.
@@ -37,7 +37,7 @@ pop_file_path = f"/Volumes/{catalog}/{schema}/population_data/population_data.js
 
 # MAGIC %md
 # MAGIC #### Load Population Data
-# MAGIC 
+# MAGIC
 # MAGIC The data is nested inside a 'data' array in the JSON. We'll explode it and select the inner fields.
 
 # COMMAND ----------
@@ -65,37 +65,70 @@ except Exception as e:
 
 # MAGIC %md
 # MAGIC #### Load BLS Time Series Data
-# MAGIC 
+# MAGIC
 # MAGIC This is a tab-separated file (.tsv) and requires trimming whitespace, as per the hackathon hint.
 
 # COMMAND ----------
 
+# Using hardcoded values for simplicity in the bundle
+
 try:
-    # Read the tab-delimited file
+    # Read the tab-delimited file with more robust options
     raw_bls_df = spark.read.format("csv") \
         .option("header", "true") \
         .option("delimiter", "\t") \
+        .option("inferSchema", "false") \
+        .option("mode", "PERMISSIVE") \
+        .option("columnNameOfCorruptRecord", "_corrupt_record") \
         .load(bls_file_path)
 
-    # Trim whitespace from all columns
-    bls_df = raw_bls_df.select([trim(col(c)).alias(c) for c in raw_bls_df.columns])
+    # Check if we got any data
+    row_count = raw_bls_df.count()
+    print(f"Rows loaded: {row_count}")
     
-    # Cast value to Double for aggregation
-    bls_df = bls_df.withColumn("value", col("value").cast(DoubleType()))
+    if row_count == 0:
+        print("WARNING: No rows loaded. The file might be empty or format is incorrect.")
+    
+    # First, clean up column names by removing leading/trailing whitespace
+    cleaned_columns = {c: c.strip() for c in raw_bls_df.columns}
+    bls_df = raw_bls_df
+    for old_name, new_name in cleaned_columns.items():
+        if old_name != new_name:
+            bls_df = bls_df.withColumnRenamed(old_name, new_name)
+    
+    print(f"Column names after cleaning: {bls_df.columns}")
+    
+    # Trim whitespace from all column values
+    bls_df = bls_df.select([trim(col(c)).alias(c) for c in bls_df.columns])
+    
+    # Cast value to Double for aggregation (with error handling)
+    if "value" in bls_df.columns:
+        bls_df = bls_df.withColumn("value", col("value").cast(DoubleType()))
+    else:
+        print(f"WARNING: 'value' column not found. Available columns: {bls_df.columns}")
 
     print("BLS data loaded and trimmed:")
     bls_df.printSchema()
-    bls_df.show(5)
+    bls_df.show(5, truncate=False)
+    
+    # Check for corrupt records
+    if "_corrupt_record" in bls_df.columns:
+        corrupt_count = bls_df.filter(col("_corrupt_record").isNotNull()).count()
+        if corrupt_count > 0:
+            print(f"\nWARNING: Found {corrupt_count} corrupt records")
+            bls_df.filter(col("_corrupt_record").isNotNull()).show(5, truncate=False)
 
 except Exception as e:
     print(f"Error loading BLS data: {e}")
+    import traceback
+    traceback.print_exc()
     dbutils.notebook.exit(f"Failed to load BLS data from {bls_file_path}")
 
 # COMMAND ----------
 
 # MAGIC %md
 # MAGIC ### Part 3.1: Population Data Analysis
-# MAGIC 
+# MAGIC
 # MAGIC Generate the mean and the standard deviation of the annual US population across the years [2013, 2018] inclusive.
 
 # COMMAND ----------
@@ -114,7 +147,7 @@ pop_stats_df.show()
 
 # MAGIC %md
 # MAGIC ### Part 3.2: Time-Series "Best Year" Analysis
-# MAGIC 
+# MAGIC
 # MAGIC For every series_id, find the *best year*: the year with the max/largest sum of "value" for all quarters in that year.
 
 # COMMAND ----------
@@ -140,7 +173,7 @@ best_year_df.show()
 
 # MAGIC %md
 # MAGIC ### Part 3.3: Joined Report
-# MAGIC 
+# MAGIC
 # MAGIC Generate a report that will provide the `value` for `series_id = PRS30006032` and `period = Q01` and the `population` for that given year.
 
 # COMMAND ----------
@@ -158,17 +191,19 @@ pop_join_df = pop_df.withColumn("year_str", col("Year").cast("string"))
 # 3. Join the two dataframes
 joined_df = bls_filtered_df.join(
     pop_join_df,
-    bls_filtered_df.year == pop_join_df.year_str
+    bls_filtered_df.year == pop_join_df.year_str,
+    "inner"  # Explicitly specify join type
 )
 
 # 4. Select and show the final report
+# Use explicit dataframe references to avoid ambiguity
 final_report_df = joined_df.select(
-    col("series_id"),
-    col("year"),
-    col("period"),
-    col("value"),
-    col("Population")
-).orderBy(col("year").desc())
+    bls_filtered_df.series_id,
+    bls_filtered_df.year,
+    bls_filtered_df.period,
+    bls_filtered_df.value,
+    pop_join_df.Population
+).orderBy(bls_filtered_df.year.desc())
 
 final_report_df.show()
 
