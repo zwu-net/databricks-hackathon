@@ -9,12 +9,20 @@ resources:
   jobs:
     databricks-hackathon-job:
       name: "[Hackathon] End-to-End Pipeline"
+
       tasks:
+        - task_key: "00_setup_schema"
+          description: "Creates catalog, schema, and volumes if they don't exist"
+          sql_task:
+            file:
+              path: "set_up_schema.sql"
+
         - task_key: "01_ingest_data"
           description: "Ingests BLS and Population data into UC Volumes"
           notebook_task:
             notebook_path: "01_data_ingestion.py"
-          job_cluster_key: "default_cluster"
+          depends_on:
+            - task_key: "00_setup_schema"
 
         - task_key: "02_analyze_data"
           description: "Runs analytics on the ingested data"
@@ -22,33 +30,32 @@ resources:
             notebook_path: "02_data_analytics.py"
           depends_on:
             - task_key: "01_ingest_data"
-          job_cluster_key: "default_cluster"
 
         - task_key: "03_train_model"
           description: "Trains and registers the sentiment analysis model"
           notebook_task:
             notebook_path: "03_model_training.py"
-          job_cluster_key: "default_cluster"
+          depends_on:
+            - task_key: "02_analyze_data"
 
-      job_clusters:
-        - job_cluster_key: "default_cluster"
-          new_cluster:
-            spark_version: "14.3.x-cpu-ml-scala2.12"
-            node_type_id: "i3.xlarge"
-            num_workers: 1
+      # Use serverless compute (available in Free Edition since June 2024)
+      # No need to specify job_clusters - serverless is the default
 
   model_serving_endpoints:
     sentiment-analysis:
       name: "sentiment-analysis"
       config:
-        served_models:
+        served_entities:
           - name: "sentiment_model"
-            model_name: "main.hackathon.sentiment_analysis_model" # Must match model name in 03_model_training.py
-            scale_to_zero_enabled: true
+            entity_name: "main.hackathon.sentiment_analysis_model"
+            entity_version: "1"
             workload_size: "Small"
-            model_version: "1"
+            scale_to_zero_enabled: true
+
 # Define the project's development target
 targets:
   dev:
     mode: development
     default: true
+    workspace:
+      host: ${DATABRICKS_HOST}
