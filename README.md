@@ -287,7 +287,7 @@ For questions or feedback about this project:
 
 ---
 
-**License:** MIT License (or specify your license)
+**License:** MIT License 
 
 **Acknowledgments:**
 * Bureau of Labor Statistics for the open data
