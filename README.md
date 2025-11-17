@@ -1,6 +1,6 @@
 # Databricks Hackathon Submission
 ## Project: End-to-End Data & MLOps Pipeline
-[Demo Video in LinkedIn](https://www.linkedin.com/posts/activity-7395691734997008384-9ZvB?utm_source=share&utm_medium=member_desktop&rcm=ACoAAALCRCMBwvDODdnUtEYs0mBkVQVeBA2iKbA) [Demo Video in Reddit]([https://www.reddit.com/r/dataengineering/comments/1oymuvd/databricks_free_edition_hackathon/](https://www.reddit.com/r/databricks/comments/1ozwln4/databricks_free_edition_hackathon_submission/)
+[Demo Video in LinkedIn](https://www.linkedin.com/posts/activity-7395691734997008384-9ZvB?utm_source=share&utm_medium=member_desktop&rcm=ACoAAALCRCMBwvDODdnUtEYs0mBkVQVeBA2iKbA) [Demo Video in Reddit(https://www.reddit.com/r/databricks/comments/1ozwln4/databricks_free_edition_hackathon_submission/)
 ### 1. Introduction
 This repository contains my submission for the Databricks Hackathon. The project implements a complete, end-to-end data and machine learning pipeline built on the Databricks Data Intelligence Platform, designed for **Databricks Free Edition** (available since June 2024).
 
