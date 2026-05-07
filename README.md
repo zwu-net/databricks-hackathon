@@ -282,7 +282,7 @@ databricks-hackathon/
 ### 11. 📧 Contact
 
 For questions or feedback about this project:
-* Email: zhou.wu@lwtech.edu
+* Email: zwu.net@gmail.com
 * GitHub: https://github.com/zwu-net
 
 ---
